@@ -1,4 +1,4 @@
-module github.com/matthewlavine/portknocker
+module github.com/MatthewLavine/portknocker
 
 go 1.23
 
