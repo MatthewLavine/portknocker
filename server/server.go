@@ -48,8 +48,9 @@ func main() {
 }
 
 func startPeerManager(ctx context.Context) {
+	log.Println("Starting peer manager")
 	go func() {
-		log.Println("Starting peer manager...")
+		log.Println("Started peer manager")
 		ticker := time.NewTicker(1 * time.Second)
 		for {
 			select {
@@ -77,7 +78,6 @@ func startBaseServer(ctx context.Context) {
 			http.Error(w, "Error getting peer", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("Received request to %s from %s\n", r.Host, peer)
 
 		if !isPeerAllowed(peer) {
 			log.Printf("Peer %s is not allowed\n", peer)
@@ -100,7 +100,6 @@ func startKnockServers(ctx context.Context) {
 					http.Error(w, "Error getting peer", http.StatusInternalServerError)
 					return
 				}
-				log.Printf("Received knock request to %s from %s\n", r.Host, peer)
 				allowPeer(peer)
 				w.Write([]byte("Knock, knock!"))
 			}))
@@ -151,10 +150,27 @@ func getPeer(r *http.Request) (net.IP, error) {
 	return net.ParseIP(peer), nil
 }
 
+func getHostPort(r *http.Request) string {
+	_, hostPort, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		return "-1"
+	}
+	return hostPort
+}
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s :%s %s %s", r.Method, getHostPort(r), r.URL.Path, r.RemoteAddr)
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		log.Printf("%s :%s %s %s %s", r.Method, getHostPort(r), r.URL.Path, r.RemoteAddr, time.Since(start))
+	})
+}
+
 func startHttpServer(ctx context.Context, port int, handler http.Handler) {
 	s := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: handler,
+		Handler: loggingMiddleware(handler),
 	}
 	gracefulshutdown.AddShutdownHandler(func() error {
 		log.Printf("Shutting down HTTP server on %d...\n", port)
