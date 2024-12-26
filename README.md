@@ -1,6 +1,6 @@
 # Port Knocker
 
-[![Go](https://github.com/MatthewLavine/portknocker/actions/workflows/go.yml/badge.svg)](https://github.com/MatthewLavine/portknocker/actions/workflows/go.yml)
+[![Go](https://github.com/MatthewLavine/portknocker/actions/workflows/go.yml/badge.svg)](https://github.com/MatthewLavine/portknocker/actions/workflows/go.yml) [![Docker Image CI](https://github.com/MatthewLavine/portknocker/actions/workflows/docker-image.yml/badge.svg)](https://github.com/MatthewLavine/portknocker/actions/workflows/docker-image.yml)
 
 Basic implementation of a port knocking server + client.
 
