@@ -7,15 +7,23 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/MatthewLavine/gracefulshutdown"
 )
 
 var (
-	basePort    = flag.Int("basePort", 8080, "The base port to use for the server")
-	knockLength = flag.Int("knockLength", 1, "The number of ports to knock on")
-	allowedIps  = []net.IP{}
+	basePort       = flag.Int("basePort", 8080, "The base port to use for the server")
+	knockLength    = flag.Int("knockLength", 1, "The number of ports to knock on")
+	accessDuration = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
+	allowedPeers   = []*allowedPeer{}
 )
+
+type allowedPeer struct {
+	ip    net.IP
+	start time.Time
+	end   time.Time
+}
 
 func main() {
 	ctx := context.Background()
@@ -42,6 +50,7 @@ func startBaseServer(ctx context.Context) {
 
 		if !isPeerAllowed(peer) {
 			log.Printf("Peer %s is not allowed\n", peer)
+			logAllowedPeers()
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
@@ -70,24 +79,33 @@ func startKnockServers(ctx context.Context) {
 
 func logAllowedPeers() {
 	log.Println("Allowed peers:")
-	for _, allowed := range allowedIps {
-		log.Printf(" - %s\n", allowed)
+	if len(allowedPeers) == 0 {
+		log.Println(" - None")
+		return
+	}
+	for _, allowed := range allowedPeers {
+		log.Printf(" - %s (Expiration in %s)\n", allowed.ip, time.Until(allowed.end).Round(time.Second))
 	}
 }
 
 func allowPeer(peer net.IP) {
 	if isPeerAllowed(peer) {
 		log.Printf("Peer %s is already allowed\n", peer)
+		logAllowedPeers()
 		return
 	}
 	log.Printf("Allowing peer %s\n", peer)
-	allowedIps = append(allowedIps, peer)
+	allowedPeers = append(allowedPeers, &allowedPeer{
+		ip:    peer,
+		start: time.Now(),
+		end:   time.Now().Add(*accessDuration),
+	})
 	logAllowedPeers()
 }
 
 func isPeerAllowed(peer net.IP) bool {
-	for _, allowed := range allowedIps {
-		if allowed.Equal(peer) {
+	for _, allowed := range allowedPeers {
+		if allowed.ip.Equal(peer) {
 			return true
 		}
 	}
