@@ -15,7 +15,7 @@ import (
 var (
 	basePort       = flag.Int("basePort", 8080, "The base port to use for the server")
 	knockLength    = flag.Int("knockLength", 1, "The number of ports to knock on")
-	accessDuration = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
+	accessDuration = flag.Duration("accessDuration", 5*time.Second, "The duration to allow access after a successful knock")
 	allowedPeers   = []*allowedPeer{}
 )
 
@@ -34,9 +34,39 @@ func main() {
 		defer log.Println("Port knock server shut down.")
 		return nil
 	})
+	peerManagerContext, peerManagerCancel := context.WithCancel(ctx)
+	gracefulshutdown.AddShutdownHandler(func() error {
+		log.Println("Shutting down peer manager...")
+		defer log.Println("Peer manager shut down.")
+		peerManagerCancel()
+		return nil
+	})
+	startPeerManager(peerManagerContext)
 	startBaseServer(ctx)
 	startKnockServers(ctx)
 	gracefulshutdown.WaitForShutdown()
+}
+
+func startPeerManager(ctx context.Context) {
+	go func() {
+		log.Println("Starting peer manager...")
+		ticker := time.NewTicker(1 * time.Second)
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Shutting down peer manager...")
+				return
+			case <-ticker.C:
+				for i := 0; i < len(allowedPeers); i++ {
+					if time.Now().After(allowedPeers[i].end) {
+						log.Printf("Removing expired peer %s\n", allowedPeers[i].ip)
+						allowedPeers = append(allowedPeers[:i], allowedPeers[i+1:]...)
+						i--
+					}
+				}
+			}
+		}
+	}()
 }
 
 func startBaseServer(ctx context.Context) {
