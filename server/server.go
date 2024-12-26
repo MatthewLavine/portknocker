@@ -15,7 +15,7 @@ import (
 var (
 	basePort       = flag.Int("basePort", 8080, "The base port to use for the server")
 	knockLength    = flag.Int("knockLength", 1, "The number of ports to knock on")
-	accessDuration = flag.Duration("accessDuration", 5*time.Second, "The duration to allow access after a successful knock")
+	accessDuration = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
 	allowedPeers   = []*allowedPeer{}
 )
 
