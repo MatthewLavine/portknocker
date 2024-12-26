@@ -28,6 +28,7 @@ type allowedPeer struct {
 func main() {
 	ctx := context.Background()
 	log.Println("Starting port knock server...")
+	logAllowedPeers()
 	gracefulshutdown.AddShutdownHandler(func() error {
 		log.Println("Shutting down port knock server...")
 		defer log.Println("Port knock server shut down.")
