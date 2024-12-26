@@ -51,11 +51,11 @@ func startBaseServer(ctx context.Context) {
 		if !isPeerAllowed(peer) {
 			log.Printf("Peer %s is not allowed\n", peer)
 			logAllowedPeers()
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			http.Error(w, "Access denied!", http.StatusForbidden)
 			return
 		}
 
-		w.Write([]byte("Hello, World!"))
+		w.Write([]byte("Access granted!"))
 	}))
 }
 
