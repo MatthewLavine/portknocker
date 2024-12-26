@@ -19,6 +19,12 @@ var (
 
 func main() {
 	ctx := context.Background()
+	log.Println("Starting port knock server...")
+	gracefulshutdown.AddShutdownHandler(func() error {
+		log.Println("Shutting down port knock server...")
+		defer log.Println("Port knock server shut down.")
+		return nil
+	})
 	startBaseServer(ctx)
 	startKnockServers(ctx)
 	gracefulshutdown.WaitForShutdown()
@@ -97,6 +103,9 @@ func startHttpServer(ctx context.Context, port int, handler http.Handler) {
 	go func(s *http.Server) {
 		log.Printf("HTTP server listening on %s\n", s.Addr)
 		if err := s.ListenAndServe(); err != nil {
+			if err == http.ErrServerClosed {
+				return
+			}
 			log.Fatal(err)
 		}
 	}(s)
