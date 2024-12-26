@@ -68,9 +68,21 @@ func startKnockServers(ctx context.Context) {
 	}
 }
 
+func logAllowedPeers() {
+	log.Println("Allowed peers:")
+	for _, allowed := range allowedIps {
+		log.Printf(" - %s\n", allowed)
+	}
+}
+
 func allowPeer(peer net.IP) {
+	if isPeerAllowed(peer) {
+		log.Printf("Peer %s is already allowed\n", peer)
+		return
+	}
 	log.Printf("Allowing peer %s\n", peer)
 	allowedIps = append(allowedIps, peer)
+	logAllowedPeers()
 }
 
 func isPeerAllowed(peer net.IP) bool {
