@@ -20,7 +20,7 @@ var (
 	knockLength        = flag.Int("knockLength", 3, "The number of ports to knock on")
 	knockSequence      = flag.String("knockSequence", "8081,8082,8083", "The sequence of ports to knock on")
 	accessDuration     = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
-	knockTimeout       = flag.Duration("knockTimeout", 5*time.Second, "The duration to wait for the next knock in a sequence")
+	knockTimeout       = flag.Duration("knockTimeout", 5*time.Second, "The duration to wait for all knocks in a sequence")
 	allowedPeers       = []*allowedPeer{}
 	knockSessions      = []*knockSession{}
 	validKnockSequence = []int{}
