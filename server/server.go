@@ -7,17 +7,27 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MatthewLavine/gracefulshutdown"
 )
 
 var (
-	basePort       = flag.Int("basePort", 8080, "The base port to use for the server")
-	knockLength    = flag.Int("knockLength", 1, "The number of ports to knock on")
-	accessDuration = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
-	allowedPeers   = []*allowedPeer{}
+	basePort           = flag.Int("basePort", 8080, "The base port to use for the server")
+	knockLength        = flag.Int("knockLength", 3, "The number of ports to knock on")
+	knockSequence      = flag.String("knockSequence", "8081,8082,8083", "The sequence of ports to knock on")
+	accessDuration     = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
+	allowedPeers       = []*allowedPeer{}
+	knockSessions      = []*knockSession{}
+	validKnockSequence = []int{}
 )
+
+type knockSession struct {
+	ip     net.IP
+	knocks []int
+}
 
 type allowedPeer struct {
 	ip    net.IP
@@ -26,8 +36,11 @@ type allowedPeer struct {
 }
 
 func main() {
+	flag.Parse()
 	ctx := context.Background()
 	log.Println("Starting port knock server...")
+	parseKnockSequence()
+	logKnockSequence()
 	logAllowedPeers()
 	gracefulshutdown.AddShutdownHandler(func() error {
 		log.Println("Shutting down port knock server...")
@@ -100,11 +113,47 @@ func startKnockServers(ctx context.Context) {
 					http.Error(w, "Error getting peer", http.StatusInternalServerError)
 					return
 				}
+				if isPeerAllowed(peer) {
+					log.Printf("Peer %s is already allowed\n", peer)
+					logAllowedPeers()
+					w.Write([]byte("You are already allowed access!"))
+					return
+				}
+				has, s := peerHasKnockSession(peer)
+				if !has {
+					s := createKnockSessionForPeer(peer, port)
+					log.Printf("Created knock session for peer %s: %#v", peer, s.knocks)
+					w.Write([]byte("Knock, knock!"))
+					return
+				}
+				s.knocks = append(s.knocks, port)
+				if !knockSessionIsComplete(s) {
+					log.Printf("Peer %s has an incomplete knock session: %#v\n", peer, s.knocks)
+					w.Write([]byte("Knock, knock!"))
+					return
+				}
+				log.Printf("Peer %s has a complete knock session: %#v\n", peer, s.knocks)
 				allowPeer(peer)
-				w.Write([]byte("Knock, knock!"))
+				w.Write([]byte("Access granted!"))
 			}))
 		}(*basePort + i)
 	}
+}
+
+func parseKnockSequence() {
+	seq := strings.Split(*knockSequence, ",")
+	validKnockSequence = make([]int, len(seq))
+	for i, s := range seq {
+		port, err := strconv.Atoi(s)
+		if err != nil {
+			log.Fatalf("Invalid port in knock sequence: %s\n", s)
+		}
+		validKnockSequence[i] = port
+	}
+}
+
+func logKnockSequence() {
+	log.Printf("Knock sequence: %v\n", validKnockSequence)
 }
 
 func logAllowedPeers() {
@@ -116,6 +165,36 @@ func logAllowedPeers() {
 	for _, allowed := range allowedPeers {
 		log.Printf(" - %s (Expiration in %s)\n", allowed.ip, time.Until(allowed.end).Round(time.Second))
 	}
+}
+
+func peerHasKnockSession(peer net.IP) (bool, *knockSession) {
+	for _, session := range knockSessions {
+		if session.ip.Equal(peer) {
+			return true, session
+		}
+	}
+	return false, nil
+}
+
+func createKnockSessionForPeer(peer net.IP, port int) *knockSession {
+	session := &knockSession{
+		ip:     peer,
+		knocks: []int{port},
+	}
+	knockSessions = append(knockSessions, session)
+	return session
+}
+
+func knockSessionIsComplete(session *knockSession) bool {
+	if len(session.knocks) != len(validKnockSequence) {
+		return false
+	}
+	for i, port := range session.knocks {
+		if port != validKnockSequence[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func allowPeer(peer net.IP) {
