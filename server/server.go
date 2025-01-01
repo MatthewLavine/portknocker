@@ -119,8 +119,7 @@ func startResetServer(ctx context.Context) {
 			w.Write([]byte("Bye bye!"))
 			return
 		}
-		s.knocks = []int{}
-		log.Printf("Resetting knock session for peer %s: %#v\n", peer, s.knocks)
+		resetKnockSession(s)
 		w.Write([]byte("Bye bye!"))
 	}))
 }
@@ -156,6 +155,7 @@ func startKnockServers(ctx context.Context) {
 				}
 				log.Printf("Peer %s has a complete knock session: %#v\n", peer, s.knocks)
 				allowPeer(peer)
+				resetKnockSession(s)
 				w.Write([]byte("Access granted!"))
 			}))
 		}(*basePort + i)
@@ -217,6 +217,11 @@ func knockSessionIsComplete(session *knockSession) bool {
 		}
 	}
 	return true
+}
+
+func resetKnockSession(s *knockSession) {
+	s.knocks = []int{}
+	log.Printf("Resetting knock session for peer %s: %#v\n", s.ip, s.knocks)
 }
 
 func allowPeer(peer net.IP) {
