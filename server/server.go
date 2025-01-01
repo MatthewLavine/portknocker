@@ -7,17 +7,31 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MatthewLavine/gracefulshutdown"
 )
 
 var (
-	basePort       = flag.Int("basePort", 8080, "The base port to use for the server")
-	knockLength    = flag.Int("knockLength", 1, "The number of ports to knock on")
-	accessDuration = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
-	allowedPeers   = []*allowedPeer{}
+	basePort           = flag.Int("basePort", 8080, "The base port to use for the server")
+	resetPort          = flag.Int("resetPort", 8079, "The port to use for resetting a client knock session")
+	knockLength        = flag.Int("knockLength", 3, "The number of ports to knock on")
+	knockSequence      = flag.String("knockSequence", "8081,8082,8083", "The sequence of ports to knock on")
+	accessDuration     = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
+	knockTimeout       = flag.Duration("knockTimeout", 5*time.Second, "The duration to wait for the next knock in a sequence")
+	allowedPeers       = []*allowedPeer{}
+	knockSessions      = []*knockSession{}
+	validKnockSequence = []int{}
 )
+
+type knockSession struct {
+	ip     net.IP
+	knocks []int
+	start  time.Time
+	end    time.Time
+}
 
 type allowedPeer struct {
 	ip    net.IP
@@ -26,8 +40,11 @@ type allowedPeer struct {
 }
 
 func main() {
+	flag.Parse()
 	ctx := context.Background()
 	log.Println("Starting port knock server...")
+	parseKnockSequence()
+	logKnockSequence()
 	logAllowedPeers()
 	gracefulshutdown.AddShutdownHandler(func() error {
 		log.Println("Shutting down port knock server...")
@@ -44,6 +61,7 @@ func main() {
 	startPeerManager(peerManagerContext)
 	startBaseServer(ctx)
 	startKnockServers(ctx)
+	startResetServer(ctx)
 	gracefulshutdown.WaitForShutdown()
 }
 
@@ -65,6 +83,13 @@ func startPeerManager(ctx context.Context) {
 						i--
 					}
 				}
+				for i := 0; i < len(knockSessions); i++ {
+					if time.Now().After(knockSessions[i].end) {
+						log.Printf("Removing expired knock session for peer %s\n", knockSessions[i].ip)
+						knockSessions = append(knockSessions[:i], knockSessions[i+1:]...)
+						i--
+					}
+				}
 			}
 		}
 	}()
@@ -82,11 +107,31 @@ func startBaseServer(ctx context.Context) {
 		if !isPeerAllowed(peer) {
 			log.Printf("Peer %s is not allowed\n", peer)
 			logAllowedPeers()
+			logKnockSessions()
 			http.Error(w, "Access denied!", http.StatusForbidden)
 			return
 		}
 
 		w.Write([]byte("Access granted!"))
+	}))
+}
+
+func startResetServer(ctx context.Context) {
+	startHttpServer(ctx, *resetPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		peer, err := getPeer(r)
+		if err != nil {
+			log.Printf("Error getting peer: %v\n", err)
+			http.Error(w, "Error getting peer", http.StatusInternalServerError)
+			return
+		}
+		has, s := peerHasKnockSession(peer)
+		if !has {
+			log.Printf("Peer %s does not have a knock session\n", peer)
+			w.Write([]byte("Bye bye!"))
+			return
+		}
+		removeKnockSession(s)
+		w.Write([]byte("Bye bye!"))
 	}))
 }
 
@@ -100,11 +145,49 @@ func startKnockServers(ctx context.Context) {
 					http.Error(w, "Error getting peer", http.StatusInternalServerError)
 					return
 				}
+				if isPeerAllowed(peer) {
+					log.Printf("Peer %s is already allowed\n", peer)
+					logAllowedPeers()
+					w.Write([]byte("You are already allowed access!"))
+					return
+				}
+				logKnockSessions()
+				has, s := peerHasKnockSession(peer)
+				if !has {
+					s := createKnockSessionForPeer(peer, port)
+					log.Printf("Created knock session for peer %s: %#v", peer, s.knocks)
+					w.Write([]byte("Knock, knock!"))
+					return
+				}
+				s.knocks = append(s.knocks, port)
+				if !knockSessionIsComplete(s) {
+					log.Printf("Peer %s has an incomplete knock session: %#v\n", peer, s.knocks)
+					w.Write([]byte("Knock, knock!"))
+					return
+				}
+				log.Printf("Peer %s has a complete knock session: %#v\n", peer, s.knocks)
 				allowPeer(peer)
-				w.Write([]byte("Knock, knock!"))
+				removeKnockSession(s)
+				w.Write([]byte("Access granted!"))
 			}))
 		}(*basePort + i)
 	}
+}
+
+func parseKnockSequence() {
+	seq := strings.Split(*knockSequence, ",")
+	validKnockSequence = make([]int, len(seq))
+	for i, s := range seq {
+		port, err := strconv.Atoi(s)
+		if err != nil {
+			log.Fatalf("Invalid port in knock sequence: %s\n", s)
+		}
+		validKnockSequence[i] = port
+	}
+}
+
+func logKnockSequence() {
+	log.Printf("Knock sequence: %v\n", validKnockSequence)
 }
 
 func logAllowedPeers() {
@@ -115,6 +198,59 @@ func logAllowedPeers() {
 	}
 	for _, allowed := range allowedPeers {
 		log.Printf(" - %s (Expiration in %s)\n", allowed.ip, time.Until(allowed.end).Round(time.Second))
+	}
+}
+
+func peerHasKnockSession(peer net.IP) (bool, *knockSession) {
+	for _, session := range knockSessions {
+		if session.ip.Equal(peer) {
+			return true, session
+		}
+	}
+	return false, nil
+}
+
+func logKnockSessions() {
+	log.Println("Knock sessions:")
+	if len(knockSessions) == 0 {
+		log.Println(" - None")
+		return
+	}
+	for _, session := range knockSessions {
+		log.Printf(" - %s: %#v (Expiration in %s)\n", session.ip, session.knocks, time.Until(session.end).Round(time.Second))
+	}
+}
+
+func createKnockSessionForPeer(peer net.IP, port int) *knockSession {
+	session := &knockSession{
+		ip:     peer,
+		knocks: []int{port},
+		start:  time.Now(),
+		end:    time.Now().Add(*knockTimeout),
+	}
+	knockSessions = append(knockSessions, session)
+	return session
+}
+
+func knockSessionIsComplete(session *knockSession) bool {
+	if len(session.knocks) != len(validKnockSequence) {
+		return false
+	}
+	for i, port := range session.knocks {
+		if port != validKnockSequence[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func removeKnockSession(s *knockSession) {
+	log.Printf("Removing knock session for peer %s: %#v\n", s.ip, s.knocks)
+	for i, session := range knockSessions {
+		if session.ip.Equal(s.ip) {
+			knockSessions = append(knockSessions[:i], knockSessions[i+1:]...)
+			return
+		}
 	}
 }
 

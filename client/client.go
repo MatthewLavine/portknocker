@@ -29,34 +29,30 @@ func main() {
 
 	log.Println("Knocking server")
 
-	resp, err = http.Get(fmt.Sprint("http://", *host, ":", *basePort+1))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("Received unexpected knock error: %v", resp)
-	}
-
-	log.Println("Received expected knock success")
+	knock(8081)
+	knock(8082)
+	knock(8083)
 
 	log.Println("Calling server again")
 
-	resp, err = http.Get(fmt.Sprint("http://", *host, ":", *basePort))
+	log.Printf("Received response: %+v\n", get(8080))
+}
+
+func get(port int) string {
+	resp, err := http.Get(fmt.Sprint("http://", *host, ":", port))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("error in http.Get(%d): %v", port, err)
 	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("Received unexpected error: %v", resp)
-	}
-
-	log.Println("Received expected success")
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("error in io.ReadAll(%d): %v", port, err)
 	}
+	return string(body)
+}
 
-	log.Printf("Received response: %+v\n", string(body))
+func knock(port int) {
+	_, err := http.Get(fmt.Sprint("http://", *host, ":", port))
+	if err != nil {
+		log.Fatalf("error in http.Get(%d): %v", port, err)
+	}
 }
