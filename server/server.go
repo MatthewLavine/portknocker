@@ -20,6 +20,7 @@ var (
 	knockLength        = flag.Int("knockLength", 3, "The number of ports to knock on")
 	knockSequence      = flag.String("knockSequence", "8081,8082,8083", "The sequence of ports to knock on")
 	accessDuration     = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
+	knockTimeout       = flag.Duration("knockTimeout", 5*time.Second, "The duration to wait for the next knock in a sequence")
 	allowedPeers       = []*allowedPeer{}
 	knockSessions      = []*knockSession{}
 	validKnockSequence = []int{}
@@ -28,6 +29,8 @@ var (
 type knockSession struct {
 	ip     net.IP
 	knocks []int
+	start  time.Time
+	end    time.Time
 }
 
 type allowedPeer struct {
@@ -80,6 +83,13 @@ func startPeerManager(ctx context.Context) {
 						i--
 					}
 				}
+				for i := 0; i < len(knockSessions); i++ {
+					if time.Now().After(knockSessions[i].end) {
+						log.Printf("Removing expired knock session for peer %s\n", knockSessions[i].ip)
+						knockSessions = append(knockSessions[:i], knockSessions[i+1:]...)
+						i--
+					}
+				}
 			}
 		}
 	}()
@@ -120,7 +130,7 @@ func startResetServer(ctx context.Context) {
 			w.Write([]byte("Bye bye!"))
 			return
 		}
-		resetKnockSession(s)
+		removeKnockSession(s)
 		w.Write([]byte("Bye bye!"))
 	}))
 }
@@ -157,7 +167,7 @@ func startKnockServers(ctx context.Context) {
 				}
 				log.Printf("Peer %s has a complete knock session: %#v\n", peer, s.knocks)
 				allowPeer(peer)
-				resetKnockSession(s)
+				removeKnockSession(s)
 				w.Write([]byte("Access granted!"))
 			}))
 		}(*basePort + i)
@@ -207,7 +217,7 @@ func logKnockSessions() {
 		return
 	}
 	for _, session := range knockSessions {
-		log.Printf(" - %s: %#v\n", session.ip, session.knocks)
+		log.Printf(" - %s: %#v (Expiration in %s)\n", session.ip, session.knocks, time.Until(session.end).Round(time.Second))
 	}
 }
 
@@ -215,6 +225,8 @@ func createKnockSessionForPeer(peer net.IP, port int) *knockSession {
 	session := &knockSession{
 		ip:     peer,
 		knocks: []int{port},
+		start:  time.Now(),
+		end:    time.Now().Add(*knockTimeout),
 	}
 	knockSessions = append(knockSessions, session)
 	return session
@@ -232,9 +244,14 @@ func knockSessionIsComplete(session *knockSession) bool {
 	return true
 }
 
-func resetKnockSession(s *knockSession) {
-	s.knocks = []int{}
-	log.Printf("Resetting knock session for peer %s: %#v\n", s.ip, s.knocks)
+func removeKnockSession(s *knockSession) {
+	log.Printf("Removing knock session for peer %s: %#v\n", s.ip, s.knocks)
+	for i, session := range knockSessions {
+		if session.ip.Equal(s.ip) {
+			knockSessions = append(knockSessions[:i], knockSessions[i+1:]...)
+			return
+		}
+	}
 }
 
 func allowPeer(peer net.IP) {
