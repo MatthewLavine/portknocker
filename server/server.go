@@ -97,6 +97,7 @@ func startBaseServer(ctx context.Context) {
 		if !isPeerAllowed(peer) {
 			log.Printf("Peer %s is not allowed\n", peer)
 			logAllowedPeers()
+			logKnockSessions()
 			http.Error(w, "Access denied!", http.StatusForbidden)
 			return
 		}
@@ -140,6 +141,7 @@ func startKnockServers(ctx context.Context) {
 					w.Write([]byte("You are already allowed access!"))
 					return
 				}
+				logKnockSessions()
 				has, s := peerHasKnockSession(peer)
 				if !has {
 					s := createKnockSessionForPeer(peer, port)
@@ -196,6 +198,17 @@ func peerHasKnockSession(peer net.IP) (bool, *knockSession) {
 		}
 	}
 	return false, nil
+}
+
+func logKnockSessions() {
+	log.Println("Knock sessions:")
+	if len(knockSessions) == 0 {
+		log.Println(" - None")
+		return
+	}
+	for _, session := range knockSessions {
+		log.Printf(" - %s: %#v\n", session.ip, session.knocks)
+	}
 }
 
 func createKnockSessionForPeer(peer net.IP, port int) *knockSession {
