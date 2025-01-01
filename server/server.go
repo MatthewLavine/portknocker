@@ -16,6 +16,7 @@ import (
 
 var (
 	basePort           = flag.Int("basePort", 8080, "The base port to use for the server")
+	resetPort          = flag.Int("resetPort", 8079, "The port to use for resetting a client knock session")
 	knockLength        = flag.Int("knockLength", 3, "The number of ports to knock on")
 	knockSequence      = flag.String("knockSequence", "8081,8082,8083", "The sequence of ports to knock on")
 	accessDuration     = flag.Duration("accessDuration", 5*time.Minute, "The duration to allow access after a successful knock")
@@ -57,6 +58,7 @@ func main() {
 	startPeerManager(peerManagerContext)
 	startBaseServer(ctx)
 	startKnockServers(ctx)
+	startResetServer(ctx)
 	gracefulshutdown.WaitForShutdown()
 }
 
@@ -100,6 +102,26 @@ func startBaseServer(ctx context.Context) {
 		}
 
 		w.Write([]byte("Access granted!"))
+	}))
+}
+
+func startResetServer(ctx context.Context) {
+	startHttpServer(ctx, *resetPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		peer, err := getPeer(r)
+		if err != nil {
+			log.Printf("Error getting peer: %v\n", err)
+			http.Error(w, "Error getting peer", http.StatusInternalServerError)
+			return
+		}
+		has, s := peerHasKnockSession(peer)
+		if !has {
+			log.Printf("Peer %s does not have a knock session\n", peer)
+			w.Write([]byte("Bye bye!"))
+			return
+		}
+		s.knocks = []int{}
+		log.Printf("Resetting knock session for peer %s: %#v\n", peer, s.knocks)
+		w.Write([]byte("Bye bye!"))
 	}))
 }
 
