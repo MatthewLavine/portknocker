@@ -176,6 +176,9 @@ func startKnockServers(ctx context.Context) {
 
 func parseKnockSequence() {
 	seq := strings.Split(*knockSequence, ",")
+	if len(seq) != *knockLength {
+		log.Fatalf("Invalid --knockSequence length, should match --knockLength (%d): %d\n", *knockLength, len(seq))
+	}
 	validKnockSequence = make([]int, len(seq))
 	for i, s := range seq {
 		port, err := strconv.Atoi(s)
